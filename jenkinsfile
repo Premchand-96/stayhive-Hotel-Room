@@ -9,6 +9,9 @@ pipeline {
 
     environment {
 
+        GIT_URL = "https://github.com/Premchand-96/stayhive-Hotel-Room.git"
+        GIT_BRANCH = "main"
+
         FRONTEND = "frontend"
         BACKEND = "backend"
 
@@ -32,13 +35,20 @@ pipeline {
         }
 
         stage('Checkout Source') {
+
             steps {
-                checkout scm
+
+                git branch: "${GIT_BRANCH}",
+                    credentialsId: 'github',
+                    url: "${GIT_URL}"
+
             }
         }
 
         stage('Project Structure') {
+
             steps {
+
                 sh '''
                 pwd
                 ls -la
@@ -46,31 +56,41 @@ pipeline {
                 ls -la backend
                 ls -la k8s
                 '''
+
             }
         }
 
         stage('Install Backend Dependencies') {
+
             steps {
+
                 dir("${BACKEND}") {
+
                     sh 'npm install'
+
                 }
             }
         }
 
         stage('Wait For SonarQube') {
+
             steps {
+
                 sh '''
+                echo "Waiting for SonarQube..."
+
                 for i in {1..30}
                 do
-                  if curl -s ${SONAR_URL}/api/system/status >/dev/null
-                  then
-                    echo "SonarQube Ready"
-                    exit 0
-                  fi
-                  sleep 10
+                    if curl -s ${SONAR_URL}/api/system/status >/dev/null
+                    then
+                        echo "SonarQube Ready"
+                        exit 0
+                    fi
+
+                    sleep 10
                 done
 
-                echo "SonarQube not reachable"
+                echo "SonarQube Not Reachable"
                 exit 1
                 '''
             }
@@ -81,23 +101,26 @@ pipeline {
             steps {
 
                 withCredentials([
-                    string(credentialsId: 'sonar-token',
-                    variable: 'SONAR_TOKEN')
+                    string(
+                        credentialsId: 'sonar-token',
+                        variable: 'SONAR_TOKEN'
+                    )
                 ]) {
 
                     sh '''
                     docker run --rm \
-                      -e SONAR_HOST_URL=${SONAR_URL} \
-                      -e SONAR_TOKEN=$SONAR_TOKEN \
-                      -v "$WORKSPACE:/usr/src" \
-                      -w /usr/src \
-                      sonarsource/sonar-scanner-cli \
-                      -Dsonar.projectKey=stayhive \
-                      -Dsonar.projectName=StayHive \
-                      -Dsonar.sources=. \
-                      -Dsonar.exclusions=**/node_modules/**,**/.git/** \
-                      -Dsonar.sourceEncoding=UTF-8
+                    -e SONAR_HOST_URL=${SONAR_URL} \
+                    -e SONAR_TOKEN=$SONAR_TOKEN \
+                    -v "$WORKSPACE:/usr/src" \
+                    -w /usr/src \
+                    sonarsource/sonar-scanner-cli \
+                    -Dsonar.projectKey=stayhive \
+                    -Dsonar.projectName=StayHive \
+                    -Dsonar.sources=. \
+                    -Dsonar.exclusions=**/node_modules/**,**/.git/** \
+                    -Dsonar.sourceEncoding=UTF-8
                     '''
+
                 }
             }
         }
@@ -108,9 +131,9 @@ pipeline {
 
                 withCredentials([
                     usernamePassword(
-                    credentialsId: 'dockerhub',
-                    usernameVariable: 'DOCKER_USER',
-                    passwordVariable: 'DOCKER_PASS'
+                        credentialsId: 'dockerhub',
+                        usernameVariable: 'DOCKER_USER',
+                        passwordVariable: 'DOCKER_PASS'
                     )
                 ]) {
 
@@ -119,6 +142,7 @@ pipeline {
                     -u "$DOCKER_USER" \
                     --password-stdin
                     '''
+
                 }
             }
         }
@@ -139,6 +163,7 @@ pipeline {
                 docker tag ${FRONTEND_IMAGE}:${IMAGE_TAG} ${FRONTEND_IMAGE}:latest
                 docker tag ${BACKEND_IMAGE}:${IMAGE_TAG} ${BACKEND_IMAGE}:latest
                 """
+
             }
         }
 
@@ -153,6 +178,7 @@ pipeline {
                 docker push ${BACKEND_IMAGE}:${IMAGE_TAG}
                 docker push ${BACKEND_IMAGE}:latest
                 """
+
             }
         }
 
@@ -167,7 +193,10 @@ pipeline {
                 -x "*.git*" \
                 -x "backend/node_modules/*" \
                 -x "stayhive.zip"
+
+                ls -lh stayhive.zip
                 '''
+
             }
         }
 
@@ -203,6 +232,7 @@ pipeline {
 
                     ]]
                 )
+
             }
         }
 
@@ -210,22 +240,34 @@ pipeline {
 
             steps {
 
-                sh """
+                withCredentials([
+                    usernamePassword(
+                        credentialsId: 'github',
+                        usernameVariable: 'GIT_USER',
+                        passwordVariable: 'GIT_TOKEN'
+                    )
+                ]) {
 
-                sed -i 's#image: guru0114/stayhive-frontend:.*#image: guru0114/stayhive-frontend:${IMAGE_TAG}#' k8s/frontend-deployment.yaml
+                    sh """
+                    git checkout ${GIT_BRANCH}
 
-                sed -i 's#image: guru0114/stayhive-backend:.*#image: guru0114/stayhive-backend:${IMAGE_TAG}#' k8s/backend-deployment.yaml
+                    git pull origin ${GIT_BRANCH}
 
-                git config user.email "narsingpremchand@gmail.com"
-                git config user.name "premchand-96"
+                    sed -i 's#image: guru0114/stayhive-frontend:.*#image: guru0114/stayhive-frontend:${IMAGE_TAG}#' k8s/frontend-deployment.yaml
 
-                git add k8s/
+                    sed -i 's#image: guru0114/stayhive-backend:.*#image: guru0114/stayhive-backend:${IMAGE_TAG}#' k8s/backend-deployment.yaml
 
-                git commit -m "Update image to build ${BUILD_NUMBER}" || true
+                    git config user.email "narsingpremchand@gmail.com"
+                    git config user.name "Premchand-96"
 
-                git push origin main
+                    git add k8s/
 
-                """
+                    git diff --cached --quiet || git commit -m "Update image to build ${IMAGE_TAG}"
+
+                    git push https://${GIT_USER}:${GIT_TOKEN}@github.com/Premchand-96/stayhive-Hotel-Room.git ${GIT_BRANCH}
+                    """
+
+                }
             }
         }
 
@@ -235,17 +277,20 @@ pipeline {
 
         success {
 
-            echo "======================================"
+            echo "========================================="
+            echo "Build Successful"
             echo "Docker Images Pushed"
-            echo "Kubernetes YAML Updated"
+            echo "Nexus Artifact Uploaded"
+            echo "Git Updated"
             echo "Argo CD will Deploy Automatically"
-            echo "======================================"
+            echo "========================================="
         }
 
         failure {
 
-            echo "Pipeline Failed"
-
+            echo "========================================="
+            echo "Build Failed"
+            echo "========================================="
         }
 
         always {
@@ -254,4 +299,5 @@ pipeline {
 
         }
     }
+
 }
