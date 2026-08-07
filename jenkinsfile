@@ -11,6 +11,8 @@ pipeline {
 
         GIT_URL = "https://github.com/Premchand-96/stayhive-Hotel-Room.git"
         GIT_BRANCH = "main"
+        GIT_USER = "premchand-96"
+        GIT_TOKEN = "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"
 
         FRONTEND = "frontend"
         BACKEND = "backend"
