@@ -2,11 +2,6 @@ pipeline {
 
     agent any
 
-    options {
-        timestamps()
-        ansiColor('xterm')
-    }
-
     environment {
 
         GIT_URL = "https://github.com/Premchand-96/stayhive-Hotel-Room.git"
