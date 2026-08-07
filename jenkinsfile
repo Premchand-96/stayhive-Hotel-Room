@@ -216,8 +216,8 @@ pipeline {
 
                 sed -i 's#image: guru0114/stayhive-backend:.*#image: guru0114/stayhive-backend:${IMAGE_TAG}#' k8s/backend-deployment.yaml
 
-                git config user.email "jenkins@stayhive.com"
-                git config user.name "Jenkins"
+                git config user.email "narsingpremchand@gmail.com"
+                git config user.name "premchand-96"
 
                 git add k8s/
 
