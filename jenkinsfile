@@ -238,39 +238,38 @@ pipeline {
         }
 
         stage('Update Kubernetes Manifests') {
+    steps {
+        withCredentials([
+            usernamePassword(
+                credentialsId: 'github',
+                usernameVariable: 'GIT_USERNAME',
+                passwordVariable: 'GIT_PASSWORD'
+            )
+        ]) {
 
-            steps {
+            sh '''
+            git checkout ${GIT_BRANCH}
 
-                withCredentials([
-                    usernamePassword(
-                        credentialsId: 'github',
-                        usernameVariable: 'GIT_USER',
-                        passwordVariable: 'GIT_TOKEN'
-                    )
-                ]) {
+            git pull origin ${GIT_BRANCH}
 
-                    sh """
-                    git checkout ${GIT_BRANCH}
+            sed -i "s#image: guru0114/stayhive-frontend:.*#image: guru0114/stayhive-frontend:${IMAGE_TAG}#" k8s/frontend-deployment.yaml
 
-                    git pull origin ${GIT_BRANCH}
+            sed -i "s#image: guru0114/stayhive-backend:.*#image: guru0114/stayhive-backend:${IMAGE_TAG}#" k8s/backend-deployment.yaml
 
-                    sed -i 's#image: guru0114/stayhive-frontend:.*#image: guru0114/stayhive-frontend:${IMAGE_TAG}#' k8s/frontend-deployment.yaml
+            git config user.email "narsingpremchand@gmail.com"
+            git config user.name "Premchand-96"
 
-                    sed -i 's#image: guru0114/stayhive-backend:.*#image: guru0114/stayhive-backend:${IMAGE_TAG}#' k8s/backend-deployment.yaml
+            git add k8s/
 
-                    git config user.email "narsingpremchand@gmail.com"
-                    git config user.name "Premchand-96"
+            git diff --cached --quiet || git commit -m "Update image to build ${IMAGE_TAG}"
 
-                    git add k8s/
+            git remote set-url origin https://${GIT_USERNAME}:${GIT_PASSWORD}@github.com/Premchand-96/stayhive-Hotel-Room.git
 
-                    git diff --cached --quiet || git commit -m "Update image to build ${IMAGE_TAG}"
-
-                    git push https://${GIT_USER}:${GIT_TOKEN}@github.com/Premchand-96/stayhive-Hotel-Room.git ${GIT_BRANCH}
-                    """
-
-                }
-            }
+            git push origin ${GIT_BRANCH}
+            '''
         }
+    }
+}
 
     }
 
