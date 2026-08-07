@@ -1,0 +1,257 @@
+pipeline {
+
+    agent any
+
+    options {
+        timestamps()
+        ansiColor('xterm')
+    }
+
+    environment {
+
+        FRONTEND = "frontend"
+        BACKEND = "backend"
+
+        FRONTEND_IMAGE = "guru0114/stayhive-frontend"
+        BACKEND_IMAGE = "guru0114/stayhive-backend"
+
+        IMAGE_TAG = "${BUILD_NUMBER}"
+
+        SONAR_URL = "http://16.112.182.98:9000"
+
+        NEXUS_URL = "16.112.182.98:8081"
+        NEXUS_REPO = "stayhive-raw"
+    }
+
+    stages {
+
+        stage('Clean Workspace') {
+            steps {
+                cleanWs()
+            }
+        }
+
+        stage('Checkout Source') {
+            steps {
+                checkout scm
+            }
+        }
+
+        stage('Project Structure') {
+            steps {
+                sh '''
+                pwd
+                ls -la
+                ls -la frontend
+                ls -la backend
+                ls -la k8s
+                '''
+            }
+        }
+
+        stage('Install Backend Dependencies') {
+            steps {
+                dir("${BACKEND}") {
+                    sh 'npm install'
+                }
+            }
+        }
+
+        stage('Wait For SonarQube') {
+            steps {
+                sh '''
+                for i in {1..30}
+                do
+                  if curl -s ${SONAR_URL}/api/system/status >/dev/null
+                  then
+                    echo "SonarQube Ready"
+                    exit 0
+                  fi
+                  sleep 10
+                done
+
+                echo "SonarQube not reachable"
+                exit 1
+                '''
+            }
+        }
+
+        stage('SonarQube Scan') {
+
+            steps {
+
+                withCredentials([
+                    string(credentialsId: 'sonar-token',
+                    variable: 'SONAR_TOKEN')
+                ]) {
+
+                    sh '''
+                    docker run --rm \
+                      -e SONAR_HOST_URL=${SONAR_URL} \
+                      -e SONAR_TOKEN=$SONAR_TOKEN \
+                      -v "$WORKSPACE:/usr/src" \
+                      -w /usr/src \
+                      sonarsource/sonar-scanner-cli \
+                      -Dsonar.projectKey=stayhive \
+                      -Dsonar.projectName=StayHive \
+                      -Dsonar.sources=. \
+                      -Dsonar.exclusions=**/node_modules/**,**/.git/** \
+                      -Dsonar.sourceEncoding=UTF-8
+                    '''
+                }
+            }
+        }
+
+        stage('Docker Login') {
+
+            steps {
+
+                withCredentials([
+                    usernamePassword(
+                    credentialsId: 'dockerhub',
+                    usernameVariable: 'DOCKER_USER',
+                    passwordVariable: 'DOCKER_PASS'
+                    )
+                ]) {
+
+                    sh '''
+                    echo "$DOCKER_PASS" | docker login \
+                    -u "$DOCKER_USER" \
+                    --password-stdin
+                    '''
+                }
+            }
+        }
+
+        stage('Build Docker Images') {
+
+            steps {
+
+                sh """
+                docker build \
+                -t ${FRONTEND_IMAGE}:${IMAGE_TAG} \
+                ./frontend
+
+                docker build \
+                -t ${BACKEND_IMAGE}:${IMAGE_TAG} \
+                ./backend
+
+                docker tag ${FRONTEND_IMAGE}:${IMAGE_TAG} ${FRONTEND_IMAGE}:latest
+                docker tag ${BACKEND_IMAGE}:${IMAGE_TAG} ${BACKEND_IMAGE}:latest
+                """
+            }
+        }
+
+        stage('Push Docker Images') {
+
+            steps {
+
+                sh """
+                docker push ${FRONTEND_IMAGE}:${IMAGE_TAG}
+                docker push ${FRONTEND_IMAGE}:latest
+
+                docker push ${BACKEND_IMAGE}:${IMAGE_TAG}
+                docker push ${BACKEND_IMAGE}:latest
+                """
+            }
+        }
+
+        stage('Create ZIP Artifact') {
+
+            steps {
+
+                sh '''
+                rm -f stayhive.zip
+
+                zip -r stayhive.zip . \
+                -x "*.git*" \
+                -x "backend/node_modules/*" \
+                -x "stayhive.zip"
+                '''
+            }
+        }
+
+        stage('Upload To Nexus') {
+
+            steps {
+
+                nexusArtifactUploader(
+
+                    nexusVersion: 'nexus3',
+
+                    protocol: 'http',
+
+                    nexusUrl: "${NEXUS_URL}",
+
+                    repository: "${NEXUS_REPO}",
+
+                    groupId: 'com.stayhive',
+
+                    version: "1.0.${BUILD_NUMBER}",
+
+                    credentialsId: 'nexus',
+
+                    artifacts: [[
+
+                        artifactId: 'stayhive',
+
+                        classifier: '',
+
+                        file: 'stayhive.zip',
+
+                        type: 'zip'
+
+                    ]]
+                )
+            }
+        }
+
+        stage('Update Kubernetes Manifests') {
+
+            steps {
+
+                sh """
+
+                sed -i 's#image: guru0114/stayhive-frontend:.*#image: guru0114/stayhive-frontend:${IMAGE_TAG}#' k8s/frontend-deployment.yaml
+
+                sed -i 's#image: guru0114/stayhive-backend:.*#image: guru0114/stayhive-backend:${IMAGE_TAG}#' k8s/backend-deployment.yaml
+
+                git config user.email "jenkins@stayhive.com"
+                git config user.name "Jenkins"
+
+                git add k8s/
+
+                git commit -m "Update image to build ${BUILD_NUMBER}" || true
+
+                git push origin main
+
+                """
+            }
+        }
+
+    }
+
+    post {
+
+        success {
+
+            echo "======================================"
+            echo "Docker Images Pushed"
+            echo "Kubernetes YAML Updated"
+            echo "Argo CD will Deploy Automatically"
+            echo "======================================"
+        }
+
+        failure {
+
+            echo "Pipeline Failed"
+
+        }
+
+        always {
+
+            cleanWs()
+
+        }
+    }
+}
